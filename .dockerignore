@@ -1,0 +1,46 @@
+# Development files
+.env
+.env.local
+.env.*.local
+
+# Node modules (will be built in Docker)
+node_modules/
+npm-debug.log*
+
+# Storage and cache
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*
+
+# Development tools
+.git/
+.gitignore
+.gitattributes
+README.md
+phpunit.xml
+tests/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Development database
+database/database.sqlite
+database/database.sqlite-bk
+
+# Debug files
+debug_refresh.php
+test_fan_id.php
+find_fan_id.php

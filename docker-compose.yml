@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  campcounselor:
+    build: .
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_TIMEZONE=UTC
+      - APP_URL=http://localhost:8080
+      - DB_CONNECTION=sqlite
+      - DB_DATABASE=/var/www/html/database/database.sqlite
+      - LOG_CHANNEL=single
+      - LOG_LEVEL=info
+    volumes:
+      # Persist database and storage
+      - campcounselor_data:/var/www/html/database
+      - campcounselor_storage:/var/www/html/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional PostgreSQL database
+  # Uncomment if you want to use PostgreSQL instead of SQLite
+  # postgres:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_DB: campcounselor
+  #     POSTGRES_USER: campcounselor
+  #     POSTGRES_PASSWORD: your-secure-password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #
+  # Then update the campcounselor service environment:
+  # - DB_CONNECTION=pgsql
+  # - DB_HOST=postgres
+  # - DB_DATABASE=campcounselor
+  # - DB_USERNAME=campcounselor
+  # - DB_PASSWORD=your-secure-password
+
+volumes:
+  campcounselor_data:
+  campcounselor_storage:
+  # postgres_data:
