@@ -1786,8 +1786,8 @@ This will remove the saved username/fan ID from your browser.`,
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
+                    updateAlbumInGrid(currentAlbumId, currentRating, comment);
                     closeCommentModal();
-                    loadAlbums(); // Refresh the album grid
                 } else {
                     showAlert('Error', 'Error saving comment', 'danger');
                 }
@@ -1796,6 +1796,26 @@ This will remove the saved username/fan ID from your browser.`,
                 console.error('Error saving comment:', error);
                 showAlert('Error', 'Error saving comment', 'danger');
             });
+        }
+
+        function updateAlbumInGrid(albumId, rating, comment) {
+            // Find the album card in the grid by looking for the edit button with the album ID
+            const editButton = document.querySelector(`[data-album-id="${albumId}"]`);
+            if (!editButton) return;
+
+            // Get the album card (parent of the edit button's parent)
+            const albumCard = editButton.closest('.album-card');
+            if (!albumCard) return;
+
+            // Update the star display in the card
+            const starContainer = albumCard.querySelector('.stars');
+            if (starContainer) {
+                starContainer.innerHTML = generateStars(rating);
+            }
+
+            // Update the edit button's data attributes to reflect the new values
+            editButton.setAttribute('data-rating', rating);
+            editButton.setAttribute('data-comment', comment || '');
         }
 
         async function playAlbum(albumId) {
