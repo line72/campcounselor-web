@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'default' => 'sync',
+    'default' => 'database',
 
     /*
     |--------------------------------------------------------------------------
@@ -63,7 +63,10 @@ return [
             'after_commit' => false,
         ],
 
-
+        'file' => [
+            'driver' => 'file',
+            'path' => storage_path('app/queue'),
+        ],
 
     ],
 

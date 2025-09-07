@@ -125,7 +125,7 @@
 <script>
     // Additional JavaScript specific to the albums index
     document.addEventListener('DOMContentLoaded', function() {
-        // No refresh limit checking needed anymore
+        // No additional setup needed - DOM is the single source of truth
     });
 
     async function playAlbum(albumId) {

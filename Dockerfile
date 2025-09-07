@@ -175,15 +175,49 @@ php artisan view:cache\n\
 \n\
 # Note: Database migrations must be run manually\n\
 echo "Remember to run migrations: docker exec <container> php artisan migrate"\n\
+echo "Queue worker will be started automatically for async refresh functionality"\n\
 \n\
 # Set proper permissions again (in case of volume mounts)\n\
 echo "Setting file permissions..."\n\
 chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache\n\
 chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache\n\
 \n\
+# Start queue worker in background\n\
+echo "=== Starting Queue Worker ==="\n\
+php artisan queue:work --timeout=600 --tries=1 --sleep=3 --daemon &\n\
+QUEUE_PID=$!\n\
+\n\
+# Function to handle shutdown\n\
+cleanup() {\n\
+    echo "=== Shutting down ==="\n\
+    if [ ! -z "$QUEUE_PID" ]; then\n\
+        echo "Stopping queue worker (PID: $QUEUE_PID)..."\n\
+        kill $QUEUE_PID 2>/dev/null || true\n\
+        wait $QUEUE_PID 2>/dev/null || true\n\
+    fi\n\
+    echo "Stopping Apache..."\n\
+    apache2ctl stop\n\
+    exit 0\n\
+}\n\
+\n\
+# Set up signal handlers\n\
+trap cleanup SIGTERM SIGINT\n\
+\n\
 echo "=== Starting Apache HTTP Server ==="\n\
 # Start Apache in foreground\n\
-exec apache2ctl -D FOREGROUND' > /usr/local/bin/start-campcounselor.sh \
+apache2ctl -D FOREGROUND &\n\
+APACHE_PID=$!\n\
+\n\
+# Wait for Apache to start\n\
+sleep 2\n\
+\n\
+# Wait for either Apache or queue worker to exit\n\
+wait $APACHE_PID\n\
+APACHE_EXIT_CODE=$?\n\
+\n\
+# Clean up and exit with Apache exit code\n\
+cleanup\n\
+exit $APACHE_EXIT_CODE' > /usr/local/bin/start-campcounselor.sh \
     && chmod +x /usr/local/bin/start-campcounselor.sh
 
 # Set default environment variables (APP_NAME is hardcoded in config/app.php)

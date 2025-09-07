@@ -1786,8 +1786,8 @@ This will remove the saved username/fan ID from your browser.`,
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
+                    updateAlbumInGrid(currentAlbumId, currentRating, comment);
                     closeCommentModal();
-                    loadAlbums(); // Refresh the album grid
                 } else {
                     showAlert('Error', 'Error saving comment', 'danger');
                 }
@@ -1796,6 +1796,26 @@ This will remove the saved username/fan ID from your browser.`,
                 console.error('Error saving comment:', error);
                 showAlert('Error', 'Error saving comment', 'danger');
             });
+        }
+
+        function updateAlbumInGrid(albumId, rating, comment) {
+            // Find the album card in the grid by looking for the edit button with the album ID
+            const editButton = document.querySelector(`[data-album-id="${albumId}"]`);
+            if (!editButton) return;
+
+            // Get the album card (parent of the edit button's parent)
+            const albumCard = editButton.closest('.album-card');
+            if (!albumCard) return;
+
+            // Update the star display in the card
+            const starContainer = albumCard.querySelector('.stars');
+            if (starContainer) {
+                starContainer.innerHTML = generateStars(rating);
+            }
+
+            // Update the edit button's data attributes to reflect the new values
+            editButton.setAttribute('data-rating', rating);
+            editButton.setAttribute('data-comment', comment || '');
         }
 
         async function playAlbum(albumId) {
@@ -1860,29 +1880,51 @@ This will remove the saved username/fan ID from your browser.`,
         }
 
         async function refreshAlbums() {
-            // Check if we have a saved username/fan ID in localStorage
-            const savedInput = localStorage.getItem('bandcamp_user_input');
+            // Check if we have a saved fan ID in localStorage
             const savedFanId = localStorage.getItem('bandcamp_fan_id');
             
             let input;
             
-            if (savedInput) {
-                // We have a saved input, ask if they want to use it or enter a new one
-                const useStored = await showConfirm(
-                    'Refresh Albums',
-                    `Use your saved Bandcamp info: "${savedInput}"?
-                    
+            if (savedFanId) {
+                // We have a saved fan ID, use it directly without prompting
+                input = localStorage.getItem('bandcamp_user_input');
+                performRefresh(savedFanId);
+            } else {
+                // No saved fan ID, check for saved input
+                const savedInput = localStorage.getItem('bandcamp_user_input');
+                
+                if (savedInput) {
+                    // We have a saved input, ask if they want to use it or enter a new one
+                    const useStored = await showConfirm(
+                        'Refresh Albums',
+                        `Use your saved Bandcamp info: "${savedInput}"?
+                        
 Click "Yes" to refresh with saved info, or "No" to enter different credentials.
 
 💡 Tip: Right-click the refresh button to clear saved credentials.`,
-                    'Use Saved Info',
-                    'Enter New Info'
-                );
-                
-                if (useStored) {
-                    input = savedInput;
+                        'Use Saved Info',
+                        'Enter New Info'
+                    );
+                    
+                    if (useStored) {
+                        input = savedInput;
+                    } else {
+                        // User wants to enter new info
+                        input = await showPrompt(
+                            'Refresh Albums',
+                            `Enter your Bandcamp fan ID or username:
+
+If you have a username (like "myusername" from https://bandcamp.com/myusername):
+• Enter just the username and we'll look up your fan ID
+
+If you already know your fan ID (a long number):
+• Enter the fan ID directly`,
+                            'Username or Fan ID',
+                            savedInput // Pre-fill with saved value
+                        );
+                    }
                 } else {
-                    // User wants to enter new info
+                    // No saved info, prompt for input
                     input = await showPrompt(
                         'Refresh Albums',
                         `Enter your Bandcamp fan ID or username:
@@ -1892,40 +1934,26 @@ If you have a username (like "myusername" from https://bandcamp.com/myusername):
 
 If you already know your fan ID (a long number):
 • Enter the fan ID directly`,
-                        'Username or Fan ID',
-                        savedInput // Pre-fill with saved value
+                        'Username or Fan ID'
                     );
                 }
-            } else {
-                // No saved info, prompt for input
-                input = await showPrompt(
-                    'Refresh Albums',
-                    `Enter your Bandcamp fan ID or username:
-
-If you have a username (like "myusername" from https://bandcamp.com/myusername):
-• Enter just the username and we'll look up your fan ID
-
-If you already know your fan ID (a long number):
-• Enter the fan ID directly`,
-                    'Username or Fan ID'
-                );
-            }
-            
-            if (!input) return;
-            
-            // Save the input to localStorage for next time
-            localStorage.setItem('bandcamp_user_input', input.trim());
-            
-            // Check if input looks like a fan ID (all digits) or username
-            const isNumeric = /^\d+$/.test(input.trim());
-            
-            if (isNumeric) {
-                // Direct fan ID - save it too
-                localStorage.setItem('bandcamp_fan_id', input.trim());
-                performRefresh(input.trim());
-            } else {
-                // Username - need to resolve to fan ID first
-                resolveFanIdAndRefresh(input.trim());
+                
+                if (!input) return;
+                
+                // Save the input to localStorage for next time
+                localStorage.setItem('bandcamp_user_input', input.trim());
+                
+                // Check if input looks like a fan ID (all digits) or username
+                const isNumeric = /^\d+$/.test(input.trim());
+                
+                if (isNumeric) {
+                    // Direct fan ID - save it too
+                    localStorage.setItem('bandcamp_fan_id', input.trim());
+                    performRefresh(input.trim());
+                } else {
+                    // Username - need to resolve to fan ID first
+                    resolveFanIdAndRefresh(input.trim());
+                }
             }
         }
         
@@ -1950,7 +1978,6 @@ If you already know your fan ID (a long number):
                 if (data.success) {
                     // Save the resolved fan ID to localStorage
                     localStorage.setItem('bandcamp_fan_id', data.fan_id);
-                    await showAlert('Fan ID Found', `Found your fan ID: ${data.fan_id}\nNow refreshing your albums...`, 'success');
                     performRefresh(data.fan_id);
                 } else {
                     await showAlert('Fan ID Not Found', `Could not find fan ID for username "${username}".
@@ -1976,43 +2003,34 @@ Error: ${data.message}`, 'danger');
         async function performRefresh(fanId) {
             const refreshBtn = document.getElementById('refreshBtn');
             refreshBtn.disabled = true;
-            refreshBtn.textContent = 'Refreshing...';
+            refreshBtn.textContent = 'Starting refresh...';
             
-            fetch('/api/bandcamp/refresh', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    fan_id: fanId
-                })
-            })
-            .then(response => response.json())
-            .then(async (data) => {
+            try {
+                // Start the refresh task
+                const response = await fetch('/api/bandcamp/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        fan_id: fanId
+                    })
+                });
+
+                const data = await response.json();
+
                 if (data.success) {
-                    const totalAlbums = data.total_new_albums;
-                    const collectionCount = data.new_collection_albums || 0;
-                    const wishlistCount = data.new_wishlist_albums || 0;
-                    
-                    if (totalAlbums > 0) {
-                        await showAlert('Refresh Successful', `🎉 Added ${totalAlbums} new albums:
+                    // Start polling for task status
+                    await pollTaskStatus(data.task_id, fanId);
+                } else if (response.status === 409) {
+                    // Another refresh is already in progress
+                    await showAlert('Refresh In Progress', `⏳ ${data.message}
 
-• ${collectionCount} from your collection
-• ${wishlistCount} from your wishlist
-
-Your albums are now loading...`, 'success');
-                        loadAlbums(); // Refresh the album grid
-                    } else {
-                        await showAlert('Refresh Complete', `✅ No new albums were found. This could mean:
-
-• Your collection is already up to date
-• You don't have any albums in your Bandcamp collection/wishlist
-• The fan ID might be incorrect
-
-Fan ID used: ${fanId}`, 'info');
-                    }
+You can wait for the current refresh to complete or try again later.`, 'info');
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = 'Refresh Albums';
                 } else {
                     await showAlert('Refresh Failed', `❌ ${data.message}
 
@@ -2020,16 +2038,115 @@ Please check:
 • Your fan ID is correct: ${fanId}
 • Your Bandcamp profile is public
 • You have albums in your collection or wishlist`, 'danger');
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = 'Refresh Albums';
                 }
-            })
-            .catch(async (error) => {
-                console.error('Error refreshing:', error);
-                await showAlert('Connection Error', '❌ Error refreshing albums. Please check your internet connection and try again.', 'danger');
-            })
-            .finally(() => {
+            } catch (error) {
+                console.error('Error starting refresh:', error);
+                await showAlert('Connection Error', '❌ Error starting album refresh. Please check your internet connection and try again.', 'danger');
                 refreshBtn.disabled = false;
                 refreshBtn.textContent = 'Refresh Albums';
-            });
+            }
+        }
+
+        async function pollTaskStatus(taskId, fanId) {
+            const refreshBtn = document.getElementById('refreshBtn');
+            let pollCount = 0;
+            const maxPolls = 300; // 5 minutes max (300 * 1 second intervals)
+            
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/api/bandcamp/status/${taskId}`, {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success && data.task) {
+                        const task = data.task;
+                        
+                        // Update button text with current status
+                        refreshBtn.textContent = task.message || 'Refreshing...';
+                        
+                        if (task.status === 'completed') {
+                            // Task completed successfully
+                            const taskData = task.data || {};
+                            const totalAlbums = taskData.total_new_albums || 0;
+                            const collectionCount = taskData.new_collection_albums || 0;
+                            const wishlistCount = taskData.new_wishlist_albums || 0;
+                            
+                            if (totalAlbums > 0) {
+                                await showAlert('Refresh Successful', `🎉 Added ${totalAlbums} new albums:
+
+• ${collectionCount} from your collection
+• ${wishlistCount} from your wishlist
+
+Your albums are now loading...`, 'success');
+                                loadAlbums(); // Refresh the album grid
+                            } else {
+                                await showAlert('Refresh Complete', `✅ No new albums were found. This could mean:
+
+• Your collection is already up to date
+• You don't have any albums in your Bandcamp collection/wishlist
+• The fan ID might be incorrect
+
+Fan ID used: ${fanId}`, 'info');
+                            }
+                            
+                            refreshBtn.disabled = false;
+                            refreshBtn.textContent = 'Refresh Albums';
+                            return; // Stop polling
+                            
+                        } else if (task.status === 'failed') {
+                            // Task failed
+                            await showAlert('Refresh Failed', `❌ ${task.message}
+
+Please check:
+• Your fan ID is correct: ${fanId}
+• Your Bandcamp profile is public
+• You have albums in your collection or wishlist`, 'danger');
+                            
+                            refreshBtn.disabled = false;
+                            refreshBtn.textContent = 'Refresh Albums';
+                            return; // Stop polling
+                            
+                        } else if (task.status === 'running' || task.status === 'pending') {
+                            // Task still running, continue polling
+                            pollCount++;
+                            if (pollCount >= maxPolls) {
+                                await showAlert('Refresh Timeout', '⏰ The refresh is taking longer than expected. Please check back later or try again.', 'warning');
+                                refreshBtn.disabled = false;
+                                refreshBtn.textContent = 'Refresh Albums';
+                                return;
+                            }
+                            
+                            // Continue polling after 1 second
+                            setTimeout(poll, 1000);
+                        }
+                    } else {
+                        // Task not found or error
+                        await showAlert('Refresh Error', `❌ ${data.message || 'Unable to check refresh status'}`, 'danger');
+                        refreshBtn.disabled = false;
+                        refreshBtn.textContent = 'Refresh Albums';
+                    }
+                } catch (error) {
+                    console.error('Error polling task status:', error);
+                    pollCount++;
+                    if (pollCount >= maxPolls) {
+                        await showAlert('Connection Error', '❌ Lost connection while checking refresh status. Please try again.', 'danger');
+                        refreshBtn.disabled = false;
+                        refreshBtn.textContent = 'Refresh Albums';
+                    } else {
+                        // Retry after 2 seconds on error
+                        setTimeout(poll, 2000);
+                    }
+                }
+            };
+
+            // Start polling
+            poll();
         }
     </script>
 </body>

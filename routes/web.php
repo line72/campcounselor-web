@@ -18,4 +18,5 @@ Route::prefix('api/bandcamp')->group(function () {
     Route::post('fan-id', [BandcampController::class, 'getFanId'])->name('bandcamp.fan-id');
     Route::post('tracks', [BandcampController::class, 'parseTracks'])->name('bandcamp.tracks');
     Route::get('status', [BandcampController::class, 'refreshStatus'])->name('bandcamp.status');
+    Route::get('status/{taskId}', [BandcampController::class, 'refreshStatus'])->name('bandcamp.status.task');
 });

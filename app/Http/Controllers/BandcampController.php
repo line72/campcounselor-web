@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\AlbumRefreshTask;
 use App\Models\Album;
 use App\Models\Config;
 use App\Services\BandcampService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Carbon\Carbon;
 
 class BandcampController extends Controller
@@ -20,67 +23,57 @@ class BandcampController extends Controller
     }
 
     /**
-     * Refresh albums from Bandcamp
+     * Start an asynchronous album refresh task
      */
     public function refresh(Request $request): JsonResponse
     {
-        // Increase execution time limit for this operation
-        set_time_limit(300); // 5 minutes for very large collections
-        
         $validated = $request->validate([
             'fan_id' => 'required|string',
         ]);
 
         $fanId = $validated['fan_id'];
-        $config = Config::getInstance();
-        $now = Carbon::now();
 
-        Log::info("Starting album refresh for fan ID: $fanId");
-
-        try {
-            // Fetch collection (purchased albums)
-            Log::info("Fetching collection albums for fan ID: $fanId");
-            $collectionAlbums = $this->bandcampService->fetchCollection($fanId);
-            Log::info("Found " . count($collectionAlbums) . " collection albums");
-            
-            // Fetch wishlist
-            Log::info("Fetching wishlist albums for fan ID: $fanId");
-            $wishlistAlbums = $this->bandcampService->fetchWishlist($fanId);
-            Log::info("Found " . count($wishlistAlbums) . " wishlist albums");
-            
-            // Process albums with proper purchased/wishlist logic
-            $result = $this->processAllAlbums($collectionAlbums, $wishlistAlbums);
-            $newCollectionCount = $result['new_collection'];
-            $newWishlistCount = $result['new_wishlist'];
-            
-            Log::info("Inserted $newCollectionCount new collection albums");
-            Log::info("Inserted $newWishlistCount new wishlist albums");
-
-            // Update last refresh time
-            $config->setLastRefreshTime($now);
-
-            Log::info("Album refresh completed successfully for fan ID: $fanId");
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Albums refreshed successfully',
-                'new_collection_albums' => $newCollectionCount,
-                'new_wishlist_albums' => $newWishlistCount,
-                'total_new_albums' => $newCollectionCount + $newWishlistCount,
-                'total_collection_albums' => count($collectionAlbums),
-                'total_wishlist_albums' => count($wishlistAlbums),
-                'last_refresh' => $now,
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error("Album refresh failed for fan ID $fanId: " . $e->getMessage());
-            Log::error("Stack trace: " . $e->getTraceAsString());
-            
+        // Check if there's already an active refresh task
+        $activeTaskId = Cache::get('album_refresh_active');
+        if ($activeTaskId) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error refreshing albums: ' . $e->getMessage(),
-            ], 500);
+                'message' => 'A refresh is already in progress. Please wait for it to complete.',
+                'active_task_id' => $activeTaskId,
+            ], 409);
         }
+
+        // Generate unique task ID
+        $taskId = (string) Str::uuid();
+        
+        // Mark this task as active
+        Cache::put('album_refresh_active', $taskId, 3600); // 1 hour expiration
+
+        // Create initial task data
+        $taskData = [
+            'id' => $taskId,
+            'status' => 'pending',
+            'message' => 'Task created, waiting to start...',
+            'fan_id' => $fanId,
+            'created_at' => now()->toISOString(),
+            'updated_at' => now()->toISOString(),
+            'data' => [],
+        ];
+
+        // Store task data
+        Cache::put("album_refresh_task_{$taskId}", $taskData, 3600);
+
+        // Dispatch the job
+        AlbumRefreshTask::dispatch($taskId, $fanId);
+
+        Log::info("Started album refresh task {$taskId} for fan ID: {$fanId}");
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Album refresh started',
+            'task_id' => $taskId,
+            'status' => 'pending',
+        ]);
     }
 
     /**
@@ -145,66 +138,43 @@ class BandcampController extends Controller
     }
 
     /**
-     * Get refresh status
+     * Get refresh task status
      */
-    public function refreshStatus(): JsonResponse
+    public function refreshStatus(Request $request, string $taskId = null): JsonResponse
     {
-        $config = Config::getInstance();
+        // If no task ID provided, check for active task
+        if (!$taskId) {
+            $activeTaskId = Cache::get('album_refresh_active');
+            if ($activeTaskId) {
+                $taskId = $activeTaskId;
+            } else {
+                // No active task, return general status
+                return response()->json([
+                    'active' => false,
+                    'can_refresh' => true,
+                    'last_refresh' => null, // Database access removed for simplicity
+                ]);
+            }
+        }
+
+        // Get task data from cache
+        $taskData = Cache::get("album_refresh_task_{$taskId}");
+        
+        if (!$taskData) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Task not found or expired',
+            ], 404);
+        }
 
         return response()->json([
-            'last_refresh' => $config->last_refresh_time,
-            'can_refresh' => true, // Always allow refresh
+            'success' => true,
+            'task' => $taskData,
+            'active' => $taskData['status'] === 'running' || $taskData['status'] === 'pending',
+            'can_refresh' => $taskData['status'] === 'completed' || $taskData['status'] === 'failed',
         ]);
     }
 
-    /**
-     * Process all albums from both collection and wishlist
-     */
-    private function processAllAlbums(array $collectionAlbums, array $wishlistAlbums): array
-    {
-        $newCollectionCount = 0;
-        $newWishlistCount = 0;
-        
-        // Create a map of collection album IDs for quick lookup
-        $collectionIds = array_column($collectionAlbums, 'bandcamp_id');
-        $collectionMap = array_flip($collectionIds);
-        
-        // Process collection albums first (these are purchased)
-        foreach ($collectionAlbums as $albumData) {
-            $existing = Album::where('bandcamp_id', $albumData['bandcamp_id'])->first();
-            
-            if (!$existing) {
-                Album::create(array_merge($albumData, ['purchased' => true]));
-                $newCollectionCount++;
-            } elseif (!$existing->purchased) {
-                // Update existing wishlist album to purchased
-                $existing->update(['purchased' => true]);
-            }
-        }
-        
-        // Process wishlist albums (only if not already in collection)
-        foreach ($wishlistAlbums as $albumData) {
-            // Skip if this album is already in the collection (purchased takes precedence)
-            if (isset($collectionMap[$albumData['bandcamp_id']])) {
-                continue;
-            }
-            
-            $existing = Album::where('bandcamp_id', $albumData['bandcamp_id'])->first();
-            
-            if (!$existing) {
-                Album::create(array_merge($albumData, ['purchased' => false]));
-                $newWishlistCount++;
-            }
-            // Note: We don't update purchased albums back to wishlist
-            // If an album was purchased and is now only in wishlist, 
-            // we keep it as purchased since that's the higher status
-        }
-        
-        return [
-            'new_collection' => $newCollectionCount,
-            'new_wishlist' => $newWishlistCount,
-        ];
-    }
 
     /**
      * Insert new albums into database (legacy method - kept for compatibility)
