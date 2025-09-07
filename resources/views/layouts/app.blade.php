@@ -1860,29 +1860,51 @@ This will remove the saved username/fan ID from your browser.`,
         }
 
         async function refreshAlbums() {
-            // Check if we have a saved username/fan ID in localStorage
-            const savedInput = localStorage.getItem('bandcamp_user_input');
+            // Check if we have a saved fan ID in localStorage
             const savedFanId = localStorage.getItem('bandcamp_fan_id');
             
             let input;
             
-            if (savedInput) {
-                // We have a saved input, ask if they want to use it or enter a new one
-                const useStored = await showConfirm(
-                    'Refresh Albums',
-                    `Use your saved Bandcamp info: "${savedInput}"?
-                    
+            if (savedFanId) {
+                // We have a saved fan ID, use it directly without prompting
+                input = localStorage.getItem('bandcamp_user_input');
+                performRefresh(savedFanId);
+            } else {
+                // No saved fan ID, check for saved input
+                const savedInput = localStorage.getItem('bandcamp_user_input');
+                
+                if (savedInput) {
+                    // We have a saved input, ask if they want to use it or enter a new one
+                    const useStored = await showConfirm(
+                        'Refresh Albums',
+                        `Use your saved Bandcamp info: "${savedInput}"?
+                        
 Click "Yes" to refresh with saved info, or "No" to enter different credentials.
 
 💡 Tip: Right-click the refresh button to clear saved credentials.`,
-                    'Use Saved Info',
-                    'Enter New Info'
-                );
-                
-                if (useStored) {
-                    input = savedInput;
+                        'Use Saved Info',
+                        'Enter New Info'
+                    );
+                    
+                    if (useStored) {
+                        input = savedInput;
+                    } else {
+                        // User wants to enter new info
+                        input = await showPrompt(
+                            'Refresh Albums',
+                            `Enter your Bandcamp fan ID or username:
+
+If you have a username (like "myusername" from https://bandcamp.com/myusername):
+• Enter just the username and we'll look up your fan ID
+
+If you already know your fan ID (a long number):
+• Enter the fan ID directly`,
+                            'Username or Fan ID',
+                            savedInput // Pre-fill with saved value
+                        );
+                    }
                 } else {
-                    // User wants to enter new info
+                    // No saved info, prompt for input
                     input = await showPrompt(
                         'Refresh Albums',
                         `Enter your Bandcamp fan ID or username:
@@ -1892,40 +1914,26 @@ If you have a username (like "myusername" from https://bandcamp.com/myusername):
 
 If you already know your fan ID (a long number):
 • Enter the fan ID directly`,
-                        'Username or Fan ID',
-                        savedInput // Pre-fill with saved value
+                        'Username or Fan ID'
                     );
                 }
-            } else {
-                // No saved info, prompt for input
-                input = await showPrompt(
-                    'Refresh Albums',
-                    `Enter your Bandcamp fan ID or username:
-
-If you have a username (like "myusername" from https://bandcamp.com/myusername):
-• Enter just the username and we'll look up your fan ID
-
-If you already know your fan ID (a long number):
-• Enter the fan ID directly`,
-                    'Username or Fan ID'
-                );
-            }
-            
-            if (!input) return;
-            
-            // Save the input to localStorage for next time
-            localStorage.setItem('bandcamp_user_input', input.trim());
-            
-            // Check if input looks like a fan ID (all digits) or username
-            const isNumeric = /^\d+$/.test(input.trim());
-            
-            if (isNumeric) {
-                // Direct fan ID - save it too
-                localStorage.setItem('bandcamp_fan_id', input.trim());
-                performRefresh(input.trim());
-            } else {
-                // Username - need to resolve to fan ID first
-                resolveFanIdAndRefresh(input.trim());
+                
+                if (!input) return;
+                
+                // Save the input to localStorage for next time
+                localStorage.setItem('bandcamp_user_input', input.trim());
+                
+                // Check if input looks like a fan ID (all digits) or username
+                const isNumeric = /^\d+$/.test(input.trim());
+                
+                if (isNumeric) {
+                    // Direct fan ID - save it too
+                    localStorage.setItem('bandcamp_fan_id', input.trim());
+                    performRefresh(input.trim());
+                } else {
+                    // Username - need to resolve to fan ID first
+                    resolveFanIdAndRefresh(input.trim());
+                }
             }
         }
         
@@ -1950,7 +1958,6 @@ If you already know your fan ID (a long number):
                 if (data.success) {
                     // Save the resolved fan ID to localStorage
                     localStorage.setItem('bandcamp_fan_id', data.fan_id);
-                    await showAlert('Fan ID Found', `Found your fan ID: ${data.fan_id}\nNow refreshing your albums...`, 'success');
                     performRefresh(data.fan_id);
                 } else {
                     await showAlert('Fan ID Not Found', `Could not find fan ID for username "${username}".
