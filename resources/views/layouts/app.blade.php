@@ -1983,43 +1983,34 @@ Error: ${data.message}`, 'danger');
         async function performRefresh(fanId) {
             const refreshBtn = document.getElementById('refreshBtn');
             refreshBtn.disabled = true;
-            refreshBtn.textContent = 'Refreshing...';
+            refreshBtn.textContent = 'Starting refresh...';
             
-            fetch('/api/bandcamp/refresh', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    fan_id: fanId
-                })
-            })
-            .then(response => response.json())
-            .then(async (data) => {
+            try {
+                // Start the refresh task
+                const response = await fetch('/api/bandcamp/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        fan_id: fanId
+                    })
+                });
+
+                const data = await response.json();
+
                 if (data.success) {
-                    const totalAlbums = data.total_new_albums;
-                    const collectionCount = data.new_collection_albums || 0;
-                    const wishlistCount = data.new_wishlist_albums || 0;
-                    
-                    if (totalAlbums > 0) {
-                        await showAlert('Refresh Successful', `🎉 Added ${totalAlbums} new albums:
+                    // Start polling for task status
+                    await pollTaskStatus(data.task_id, fanId);
+                } else if (response.status === 409) {
+                    // Another refresh is already in progress
+                    await showAlert('Refresh In Progress', `⏳ ${data.message}
 
-• ${collectionCount} from your collection
-• ${wishlistCount} from your wishlist
-
-Your albums are now loading...`, 'success');
-                        loadAlbums(); // Refresh the album grid
-                    } else {
-                        await showAlert('Refresh Complete', `✅ No new albums were found. This could mean:
-
-• Your collection is already up to date
-• You don't have any albums in your Bandcamp collection/wishlist
-• The fan ID might be incorrect
-
-Fan ID used: ${fanId}`, 'info');
-                    }
+You can wait for the current refresh to complete or try again later.`, 'info');
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = 'Refresh Albums';
                 } else {
                     await showAlert('Refresh Failed', `❌ ${data.message}
 
@@ -2027,16 +2018,115 @@ Please check:
 • Your fan ID is correct: ${fanId}
 • Your Bandcamp profile is public
 • You have albums in your collection or wishlist`, 'danger');
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = 'Refresh Albums';
                 }
-            })
-            .catch(async (error) => {
-                console.error('Error refreshing:', error);
-                await showAlert('Connection Error', '❌ Error refreshing albums. Please check your internet connection and try again.', 'danger');
-            })
-            .finally(() => {
+            } catch (error) {
+                console.error('Error starting refresh:', error);
+                await showAlert('Connection Error', '❌ Error starting album refresh. Please check your internet connection and try again.', 'danger');
                 refreshBtn.disabled = false;
                 refreshBtn.textContent = 'Refresh Albums';
-            });
+            }
+        }
+
+        async function pollTaskStatus(taskId, fanId) {
+            const refreshBtn = document.getElementById('refreshBtn');
+            let pollCount = 0;
+            const maxPolls = 300; // 5 minutes max (300 * 1 second intervals)
+            
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/api/bandcamp/status/${taskId}`, {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success && data.task) {
+                        const task = data.task;
+                        
+                        // Update button text with current status
+                        refreshBtn.textContent = task.message || 'Refreshing...';
+                        
+                        if (task.status === 'completed') {
+                            // Task completed successfully
+                            const taskData = task.data || {};
+                            const totalAlbums = taskData.total_new_albums || 0;
+                            const collectionCount = taskData.new_collection_albums || 0;
+                            const wishlistCount = taskData.new_wishlist_albums || 0;
+                            
+                            if (totalAlbums > 0) {
+                                await showAlert('Refresh Successful', `🎉 Added ${totalAlbums} new albums:
+
+• ${collectionCount} from your collection
+• ${wishlistCount} from your wishlist
+
+Your albums are now loading...`, 'success');
+                                loadAlbums(); // Refresh the album grid
+                            } else {
+                                await showAlert('Refresh Complete', `✅ No new albums were found. This could mean:
+
+• Your collection is already up to date
+• You don't have any albums in your Bandcamp collection/wishlist
+• The fan ID might be incorrect
+
+Fan ID used: ${fanId}`, 'info');
+                            }
+                            
+                            refreshBtn.disabled = false;
+                            refreshBtn.textContent = 'Refresh Albums';
+                            return; // Stop polling
+                            
+                        } else if (task.status === 'failed') {
+                            // Task failed
+                            await showAlert('Refresh Failed', `❌ ${task.message}
+
+Please check:
+• Your fan ID is correct: ${fanId}
+• Your Bandcamp profile is public
+• You have albums in your collection or wishlist`, 'danger');
+                            
+                            refreshBtn.disabled = false;
+                            refreshBtn.textContent = 'Refresh Albums';
+                            return; // Stop polling
+                            
+                        } else if (task.status === 'running' || task.status === 'pending') {
+                            // Task still running, continue polling
+                            pollCount++;
+                            if (pollCount >= maxPolls) {
+                                await showAlert('Refresh Timeout', '⏰ The refresh is taking longer than expected. Please check back later or try again.', 'warning');
+                                refreshBtn.disabled = false;
+                                refreshBtn.textContent = 'Refresh Albums';
+                                return;
+                            }
+                            
+                            // Continue polling after 1 second
+                            setTimeout(poll, 1000);
+                        }
+                    } else {
+                        // Task not found or error
+                        await showAlert('Refresh Error', `❌ ${data.message || 'Unable to check refresh status'}`, 'danger');
+                        refreshBtn.disabled = false;
+                        refreshBtn.textContent = 'Refresh Albums';
+                    }
+                } catch (error) {
+                    console.error('Error polling task status:', error);
+                    pollCount++;
+                    if (pollCount >= maxPolls) {
+                        await showAlert('Connection Error', '❌ Lost connection while checking refresh status. Please try again.', 'danger');
+                        refreshBtn.disabled = false;
+                        refreshBtn.textContent = 'Refresh Albums';
+                    } else {
+                        // Retry after 2 seconds on error
+                        setTimeout(poll, 2000);
+                    }
+                }
+            };
+
+            // Start polling
+            poll();
         }
     </script>
 </body>

@@ -18,7 +18,8 @@ A Laravel web application for managing your Bandcamp album collection and wishli
 - **Collection Sync**: Fetch your purchased albums from Bandcamp
 - **Wishlist Sync**: Import your Bandcamp wishlist
 - **Track Preview**: Parse and display track listings from album pages
-- **Automatic Updates**: Periodic refresh of collection data
+- **Async Refresh**: Background processing for large collections (prevents timeouts)
+- **Real-time Status**: Live progress updates during collection refresh
 - **Fan ID Resolution**: Convert Bandcamp usernames to fan IDs
 
 ### Web Interface
@@ -54,6 +55,23 @@ docker exec campcounselor php artisan migrate
 # For PostgreSQL/MariaDB
 docker exec campcounselor php artisan migrate
 ```
+
+### Queue Worker Setup
+**Good News**: The queue worker is now automatically started with the Docker container! The async album refresh feature will work out of the box.
+
+**Manual Control** (if needed):
+```bash
+# Check if queue worker is running
+docker exec campcounselor ps aux | grep "queue:work"
+
+# Restart queue worker if needed
+docker exec -d campcounselor php artisan queue:work --timeout=600 --tries=1
+
+# View queue worker logs
+docker exec campcounselor tail -f /var/www/html/storage/logs/laravel.log
+```
+
+**For Production**: The container automatically manages the queue worker, but you can still use Supervisor for advanced process management if needed.
 
 ### Running the Container
 
@@ -211,6 +229,27 @@ docker exec campcounselor php artisan migrate:status
 docker exec -it campcounselor sqlite3 /var/www/html/database/database.sqlite
 ```
 
+#### Queue Worker Management
+```bash
+# Check if queue worker is running (should be automatic)
+docker exec campcounselor ps aux | grep "queue:work"
+
+# Restart queue worker if needed
+docker exec -d campcounselor php artisan queue:work --timeout=600 --tries=1
+
+# View queue worker logs
+docker exec campcounselor tail -f /var/www/html/storage/logs/laravel.log
+
+# Check for failed jobs
+docker exec campcounselor php artisan queue:failed
+
+# Retry failed jobs
+docker exec campcounselor php artisan queue:retry all
+
+# Clear failed jobs
+docker exec campcounselor php artisan queue:flush
+```
+
 #### Common Debugging Scenarios
 
 **🔍 Application won't start:**
@@ -241,12 +280,31 @@ docker exec -it campcounselor ls -la storage/
 docker exec -it campcounselor ls -la bootstrap/cache/
 ```
 
+**🔍 Album refresh not working:**
+```bash
+# Check if queue worker is running (should be automatic)
+docker exec campcounselor ps aux | grep "queue:work"
+
+# If not running, restart the container or start manually
+docker exec -d campcounselor php artisan queue:work --timeout=600 --tries=1
+
+# Check for failed jobs
+docker exec campcounselor php artisan queue:failed
+
+# Check application logs for errors
+docker exec campcounselor tail -f /var/www/html/storage/logs/laravel.log
+
+# Check container logs for startup issues
+docker logs campcounselor
+```
+
 #### Common Issues
 - **Build fails**: Make sure Docker has internet access for package downloads
 - **Permission errors**: Ensure volumes are properly mounted with correct permissions
 - **Database connection**: Verify database credentials and network connectivity
 - **Missing APP_KEY**: Container will auto-generate one on first startup
 - **PHP errors**: Check multiple log sources - container logs, Apache logs, Laravel logs
+- **Queue worker not running**: Container automatically starts the queue worker, but you can restart it manually if needed
 
 ### Option 2: Local Development
 
@@ -294,7 +352,14 @@ docker exec -it campcounselor ls -la bootstrap/cache/
    php artisan serve
    ```
 
+8. **Start the queue worker (required for async refresh)**
+   ```bash
+   php artisan queue:work --timeout=600 --tries=1
+   ```
+
 The application will be available at `http://localhost:8000`
+
+**Important**: Both the web server (`php artisan serve`) and queue worker (`php artisan queue:work`) must be running for full functionality.
 
 ### Development Mode
 
@@ -304,7 +369,10 @@ For development with hot reloading, you can run Vite in development mode:
 # Terminal 1: Start Laravel server
 php artisan serve
 
-# Terminal 2: Start Vite development server
+# Terminal 2: Start queue worker (required for async refresh)
+php artisan queue:work --timeout=600 --tries=1
+
+# Terminal 3: Start Vite development server
 npm run dev
 ```
 
@@ -462,6 +530,33 @@ APP_URL=https://your-domain.com
 - 🗄️ **Database**: Consider PostgreSQL or MySQL for production instead of SQLite
 - 📊 **Monitoring**: Set up log rotation for `storage/logs/laravel.log`
 - 🔄 **Process Management**: Use systemd or supervisor to manage the PHP processes
+- ⚡ **Queue Worker**: **Critical** - Use Supervisor to manage the queue worker process
+
+**Supervisor Configuration for Queue Worker:**
+
+Create `/etc/supervisor/conf.d/campcounselor-worker.conf`:
+
+```ini
+[program:campcounselor-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /path/to/campcounselor/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=www-data
+numprocs=1
+redirect_stderr=true
+stdout_logfile=/path/to/campcounselor/storage/logs/worker.log
+stopwaitsecs=3600
+```
+
+Then run:
+```bash
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start campcounselor-worker:*
+```
 
 ## Usage
 
@@ -493,10 +588,11 @@ The application provides both web interface and JSON API:
 - `GET /api/albums/stats` - Collection statistics
 
 **Bandcamp Integration:**
-- `POST /api/bandcamp/refresh` - Refresh collection from Bandcamp
+- `POST /api/bandcamp/refresh` - Start async refresh of collection from Bandcamp
+- `GET /api/bandcamp/status` - Check general refresh status
+- `GET /api/bandcamp/status/{taskId}` - Check specific task status
 - `POST /api/bandcamp/fan-id` - Get fan ID from username
 - `POST /api/bandcamp/tracks` - Parse tracks from album URL
-- `GET /api/bandcamp/status` - Check refresh status
 
 ### Search and Filtering
 
@@ -623,14 +719,51 @@ Response:
 
 ### Bandcamp Integration
 
-**Refresh Collection**
+**Refresh Collection (Async)**
 ```http
 POST /api/bandcamp/refresh
 Content-Type: application/json
 
 {
-    "fan_id": "123456789",
-    "force": true
+    "fan_id": "123456789"
+}
+```
+
+Response:
+```json
+{
+    "success": true,
+    "message": "Album refresh started",
+    "task_id": "uuid-task-id",
+    "status": "pending"
+}
+```
+
+**Check Refresh Status**
+```http
+GET /api/bandcamp/status/{taskId}
+```
+
+Response:
+```json
+{
+    "success": true,
+    "task": {
+        "id": "uuid-task-id",
+        "status": "completed",
+        "message": "Refresh completed successfully",
+        "fan_id": "123456789",
+        "data": {
+            "new_collection_albums": 150,
+            "new_wishlist_albums": 75,
+            "total_new_albums": 225,
+            "total_collection_albums": 500,
+            "total_wishlist_albums": 200,
+            "last_refresh": "2025-09-07T17:31:46.661332Z"
+        }
+    },
+    "active": false,
+    "can_refresh": true
 }
 ```
 
