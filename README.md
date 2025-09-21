@@ -1,8 +1,21 @@
-# Camp Counselor - Laravel Implementation
+# Camp Counselor
 
-A Laravel web application for managing your Bandcamp album collection and wishlist. This is a PHP/Laravel port of the original Vala/GTK Camp Counselor application, providing the same functionality through a modern web interface.
+Camp Counselor is a web application for managing your Bandcamp album
+collection and wishlist. Camp Counselor helps you manage your
+Bandcamp.com wishlist to allow you to rate, sort, comment, and listen
+to albums in your wishlist.
 
-**Single-User Design**: This application is designed for personal use without authentication - perfect for managing your own music collection locally or on a private server.
+<a href="images/campcounselor-1.png">
+  <img src="images/campcounselor-1-thumb.png" width="500">
+</a>
+
+This is a PHP/Laravel port of the original [Vala/GTK Camp Counselor
+application](https://github.com/line72/campcounselor), providing the
+same functionality through a modern web interface.
+
+**Single-User Design**: This application is designed for personal use
+without authentication - perfect for managing your own music
+collection locally or on a private server.
 
 ## Features
 
@@ -561,17 +574,12 @@ sudo supervisorctl start campcounselor-worker:*
 ## Usage
 
 ### Getting Started
-1. **Get your Bandcamp Fan ID**
-   - Visit your Bandcamp profile page
-   - Use the "Get Fan ID" feature in the app, or
-   - Extract it from the page source (look for `fan_data.fan_id`)
-
-2. **Import your collection**
+1. **Import your collection**
    - Click "Refresh Albums" in the interface
-   - Enter your Fan ID when prompted
+   - Enter your Bandcamp username when prompted
    - The app will fetch your collection and wishlist
 
-3. **Rate and comment**
+2. **Rate and comment**
    - Click "Edit Comment" on any album
    - Set a star rating and add personal notes
    - Changes are saved automatically
@@ -789,11 +797,11 @@ Content-Type: application/json
 
 ## License
 
-This project is released under the GPLv3 or later, matching the original Vala application.
+This project is released under the AGPLv3 or later.
 
 ## Comparison with Original
 
-This Laravel implementation provides the same core functionality as the original Vala/GTK application:
+This Laravel implementation provides the same core functionality as the original [Vala/GTK application](https://github.com/line72/campcounselor):
 
 **Similarities:**
 - ✅ Album collection and wishlist management
