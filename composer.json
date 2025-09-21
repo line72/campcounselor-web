@@ -1,7 +1,7 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
     "name": "line72/campcounselor",
-    "version": "0.99.0",
+    "version": "0.99.1",
     "type": "project",
     "description": "Camp Counselor - A Bandcamp album collection and rating manager.",
     "keywords": ["bandcamp", "music", "collection", "rating"],
