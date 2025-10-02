@@ -36,17 +36,8 @@ self.addEventListener('fetch', event => {
         }
         
         // Otherwise fetch from network
-        return fetch(event.request).then(networkResponse => {
-          // Cache successful responses for future use
-          if (networkResponse.ok && networkResponse.status === 200) {
-            const responseToCache = networkResponse.clone();
-            caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, responseToCache);
-            });
-          }
-          return networkResponse;
-        });
-      })
+        return fetch(event.request);
+      });
   );
 });
 
