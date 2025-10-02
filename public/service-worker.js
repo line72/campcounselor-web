@@ -2,8 +2,8 @@ const CACHE_NAME = 'campcounselor-v1';
 
 // Install event - create cache
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
+  event.waitUntil(async () => {
+    return caches.open(CACHE_NAME)
       .then(cache => {
         // Only cache critical static assets with known paths
         return cache.addAll([
@@ -17,26 +17,21 @@ self.addEventListener('install', event => {
           '/favicon-32x32.png'
         ]);
       })
-  );
+  });
 });
 
 // Fetch event - implement cache-then-network strategy
 self.addEventListener('fetch', event => {
-  // Skip caching for requests to external domains or POST requests
-  if (!event.request.url.startsWith(self.location.origin) || event.request.method !== 'GET') {
-    return;
-  }
-
-  event.respondWith(
-    caches.match(event.request)
+  event.respondWith(async () => {
+    return caches.match(event.request)
       .then(response => {
-        // Return cached response if found
-        if (response) {
-          return response;
-        }
-        
-        // Otherwise fetch from network
-        return fetch(event.request);
-      });
-  );
+      // Return cached response if found                                                                                                                   
+      if (response) {
+        return response;
+      }
+
+      // Otherwise fetch from network                                                                                                                      
+      return fetch(event.request.clone());
+    });  
+  }); 
 });
