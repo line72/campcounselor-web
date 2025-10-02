@@ -14,6 +14,9 @@
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
 
+    <!-- Manifest -->
+    <link rel="manifest" href="{{ asset('manifest.json') }}">
+
     <!-- No external fonts - using system fonts for better privacy and performance -->
 
     <!-- Vite Assets -->
