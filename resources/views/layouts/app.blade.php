@@ -1484,11 +1484,29 @@
             const sortSelect = document.getElementById('sortSelect');
             
             if (filterSelect) {
-                filterSelect.addEventListener('change', loadAlbums);
+                // Atempt to restore a saved filter
+                const savedFilter = localStorage.getItem('album_filter');
+                if (savedFilter) {
+                    filterSelect.value = savedFilter;
+                }
+                
+                filterSelect.addEventListener('change', (evt) => {
+                    localStorage.setItem('album_filter', evt.target.value);
+                    loadAlbums();
+                });
             }
             
             if (sortSelect) {
-                sortSelect.addEventListener('change', loadAlbums);
+                // Atempt to restore a saved filter
+                const savedSort = localStorage.getItem('album_sort');
+                if (savedSort) {
+                    sortSelect.value = savedSort;
+                }
+                
+                sortSelect.addEventListener('change', (evt) => {
+                    localStorage.setItem('album_sort', evt.target.value);
+                    loadAlbums();
+                });
             }
 
             // Refresh buttons (handle multiple buttons with same functionality)
@@ -1595,8 +1613,8 @@ This will remove the saved username/fan ID from your browser.`,
 
         function loadAlbums(page = 1) {
             const searchTerm = document.getElementById('searchInput')?.value || '';
-            const filter = document.getElementById('filterSelect')?.value || 'all';
-            const sort = document.getElementById('sortSelect')?.value || 'artist_asc';
+            const filter = localStorage.getItem('album_filter') || document.getElementById('filterSelect')?.value || 'all';
+            const sort = localStorage.getItem('album_sort') || document.getElementById('sortSelect')?.value || 'artist_asc';
 
             const params = new URLSearchParams({
                 search: searchTerm,
